@@ -1,4 +1,5 @@
 torch>=2.0.0
+torchvision>=0.15.0
 transformer-lens>=1.0.0
 transformers>=4.30.0
 sentence-transformers>=2.2.2
