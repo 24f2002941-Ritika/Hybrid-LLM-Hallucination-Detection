@@ -19,11 +19,11 @@ Feature Clipping follows the INSIDE paper exactly:
   - Every hidden-state tensor is clipped element-wise per feature dimension j
     *before* the sentence embedding is extracted.
 """
-#hiiiiis
 import torch
 import torch.nn.functional as F
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
+from transformer_lens import utils as tl_utils
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +270,6 @@ class InternalMetrics:
             }
 
         mid_layer = self.n_layers // 2
-        resid_key = f"blocks.{mid_layer}.hook_resid_post"
 
         # ------------------------------------------------------------------
         # PASS 1: collect all middle-layer hidden states into the memory bank
@@ -282,8 +281,8 @@ class InternalMetrics:
             with torch.no_grad():
                 _, cache = self.model.run_with_cache(tokens)
 
-            # hidden: (seq_len, d_model), float32
-            hidden = cache[resid_key][0].float()
+            # Use tuple API for version-safe cache lookup
+            hidden = self._get_resid_post(cache, mid_layer)
             raw_hiddens.append(hidden)
 
             # Feed into memory bank to build distribution statistics
@@ -369,10 +368,11 @@ class InternalMetrics:
         layer_activations = []
 
         for layer_idx in range(self.n_layers):
-            resid_key = f"blocks.{layer_idx}.hook_resid_post"
-            if resid_key in cache:
-                activation = cache[resid_key]             # [batch, seq_len, d_model]
-                layer_activations.append(activation[0])   # first batch item
+            try:
+                activation = self._get_resid_post(cache, layer_idx, keep_batch=True)
+                layer_activations.append(activation)
+            except (KeyError, IndexError):
+                continue
 
         if len(layer_activations) < 2:
             return {"stability_score": 1.0}
@@ -422,11 +422,12 @@ class InternalMetrics:
         grounding_scores = []
 
         for layer_idx in range(self.n_layers):
-            attn_key = f"blocks.{layer_idx}.attn.hook_pattern"
+            try:
+                attn_pattern = self._get_attn_pattern(cache, layer_idx)
+            except (KeyError, IndexError):
+                continue
 
-            if attn_key in cache:
-                attn_pattern = cache[attn_key]       # [batch, n_heads, seq_len, seq_len]
-                attn_pattern = attn_pattern[0]       # [n_heads, seq_len, seq_len]
+            if attn_pattern is not None:
 
                 if total_length > prompt_length:
                     gen_attn = attn_pattern[:, prompt_length:, :]        # [n_heads, gen_len, seq_len]
@@ -498,3 +499,48 @@ class InternalMetrics:
             "stability_component": w2 * (1 - stability),
             "grounding_component": w3 * (1 - grounding),
         }
+
+    # ------------------------------------------------------------------
+    # Cache access helpers (version-safe)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _get_resid_post(cache, layer_idx: int, keep_batch: bool = False) -> torch.Tensor:
+        """Retrieve residual-stream activations for a layer, version-safe."""
+        # Try the tuple API first (canonical TransformerLens)
+        try:
+            act = cache["resid_post", layer_idx]
+        except (KeyError, IndexError):
+            # Fallback: try the full key directly in cache_dict
+            full_key = tl_utils.get_act_name("resid_post", layer_idx)
+            if full_key in cache.cache_dict:
+                act = cache.cache_dict[full_key]
+            else:
+                # Last resort: scan for any matching key
+                for k in cache.cache_dict:
+                    if f"blocks.{layer_idx}" in k and "resid_post" in k:
+                        act = cache.cache_dict[k]
+                        break
+                else:
+                    raise KeyError(f"Cannot find resid_post for layer {layer_idx}")
+        if keep_batch:
+            return act[0].float()  # first batch item
+        return act[0].float()
+
+    @staticmethod
+    def _get_attn_pattern(cache, layer_idx: int) -> torch.Tensor:
+        """Retrieve attention pattern for a layer, version-safe."""
+        try:
+            attn = cache["pattern", layer_idx]
+        except (KeyError, IndexError):
+            full_key = tl_utils.get_act_name("pattern", layer_idx)
+            if full_key in cache.cache_dict:
+                attn = cache.cache_dict[full_key]
+            else:
+                for k in cache.cache_dict:
+                    if f"blocks.{layer_idx}" in k and "pattern" in k:
+                        attn = cache.cache_dict[k]
+                        break
+                else:
+                    return None
+        return attn[0]  # [n_heads, seq_len, seq_len]
