@@ -21,7 +21,7 @@ LIGHT_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0.02)",
     font=dict(color="#4b5563"),
-    margin=dict(t=60, b=50, l=70, r=20),
+    margin=dict(t=80, b=60, l=80, r=30),
 )
 
 _RED_GREEN = [
@@ -103,14 +103,14 @@ def _response_metric_heatmap(
         risk_col,
     ], dtype=float).T  # shape (n_responses, 4)
 
-    # Build text annotations
+    # Build text annotations (2 d.p. to fit inside narrow cells)
     text = []
     for i in range(n):
         row_text = [
-            f"{stability_col[i]:.3f}",
-            f"{grounding_col[i]:.3f}",
-            f"{ext_match_col[i]:.3f}",
-            f"{risk_col[i]:.3f}",
+            f"{stability_col[i]:.2f}",
+            f"{grounding_col[i]:.2f}",
+            f"{ext_match_col[i]:.2f}",
+            f"{risk_col[i]:.2f}",
         ]
         text.append(row_text)
 
@@ -127,10 +127,12 @@ def _response_metric_heatmap(
             y=row_labels,
             text=text,
             texttemplate="%{text}",
-            textfont=dict(size=13, color="white"),
+            textfont=dict(size=10, color="white"),
             colorscale=_GREEN_RED,
             zmin=0,
             zmax=1,
+            xgap=3,
+            ygap=3,
             colorbar=dict(
                 title=dict(text="Score", font=dict(color="#4b5563")),
                 tickfont=dict(color="#4b5563"),
@@ -151,12 +153,14 @@ def _response_metric_heatmap(
             z=risk_z,
             x=col_names,
             y=row_labels,
-            text=[[None, None, None, f"{risk_col[i]:.3f}"] for i in range(n)],
+            text=[[None, None, None, f"{risk_col[i]:.2f}"] for i in range(n)],
             texttemplate="%{text}",
-            textfont=dict(size=13, color="white"),
+            textfont=dict(size=10, color="white"),
             colorscale=_RED_GREEN,
             zmin=0,
             zmax=1,
+            xgap=3,
+            ygap=3,
             showscale=False,
             hoverinfo="skip",
         )
@@ -167,13 +171,18 @@ def _response_metric_heatmap(
             text="🔥 Response × Metric Hallucination Heatmap",
             font=dict(color="#111827", size=15),
         ),
-        xaxis=dict(title="Metric", side="top", tickfont=dict(color="#111827", size=12)),
+        xaxis=dict(
+            title="Metric",
+            side="top",
+            tickfont=dict(color="#111827", size=12),
+            tickangle=0,
+        ),
         yaxis=dict(
             title="Response",
             tickfont=dict(color="#111827", size=12),
             autorange="reversed",
         ),
-        height=max(300, 80 + 55 * n),
+        height=max(350, 120 + 75 * n),
         **LIGHT_LAYOUT,
     )
     return fig
